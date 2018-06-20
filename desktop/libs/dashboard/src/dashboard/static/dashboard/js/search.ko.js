@@ -2331,8 +2331,7 @@ var SearchViewModel = function (collection_json, query_json, initial_json, has_g
           || ko.toJSON(_prop.selectedMultiq()) != ko.mapping.toJSON(self.query.selectedMultiq())) {
           self.selectedQDefinition().hasChanged(true);
         }
-      }
-      else if (location.getParameter("collection") != "") {
+      } else if (location.getParameter("collection") != "") {
         var firstQuery = self.query.qs()[0].q();
         if (firstQuery != location.getParameter("q")) {
           hueUtils.changeURL("?collection=" + location.getParameter("collection") + (firstQuery ? "&q=" + firstQuery : ""));
@@ -2370,7 +2369,11 @@ var SearchViewModel = function (collection_json, query_json, initial_json, has_g
       }
 
       if (self.collection.engine() != 'solr') {
-        $.each([self.collection].concat(self.collection.facets()), function (index, facet) {
+    	var queryFragments = [].concat(self.collection.facets());
+    	if (self.collection.engine() != 'report') {
+    	  queryFragments.concat([self.collection]);
+    	}
+        $.each(queryFragments, function (index, facet) {
           if (facet.queryResult().result.handle) {
             self.close(facet);
           }
@@ -2394,7 +2397,7 @@ var SearchViewModel = function (collection_json, query_json, initial_json, has_g
         });
 
         if (self.collection.async()) {
-          self.asyncSearchesCounter([self.collection].concat(self.collection.facets()));
+          self.asyncSearchesCounter(queryFragments);
         }
       }
 
@@ -2406,9 +2409,10 @@ var SearchViewModel = function (collection_json, query_json, initial_json, has_g
         self.getFieldAnalysis().update();
       }
 
-
-      $.when.apply($, [
-        $.post("/dashboard/search", {
+      
+      if (self.collection.engine() != 'report') {
+        multiQs.concat([
+          $.post("/dashboard/search", {
             collection: ko.mapping.toJSON(self.collection),
             query: ko.mapping.toJSON(self.query),
             layout: ko.mapping.toJSON(self.columns)
@@ -2436,9 +2440,10 @@ var SearchViewModel = function (collection_json, query_json, initial_json, has_g
             }
           },
           "text")
-        ].concat(multiQs)
-      )
-      .done(function () {
+        ]);
+      }
+
+      $.when.apply($, multiQs).done(function () {
         if (arguments[0] instanceof Array) {
           if (self.collection.engine() == 'solr') { // If multi queries
             var histograms = self.collection.getHistogramFacets();
