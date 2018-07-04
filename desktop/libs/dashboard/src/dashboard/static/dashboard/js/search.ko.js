@@ -846,6 +846,26 @@ var Collection = function (vm, collection) {
       });
     }
 
+    if (facet.properties.uuid) {
+      facet.properties.uuid.subscribe(function(val){
+        $.get('/desktop/api2/doc/', {
+          uuid: val,
+          data: true,
+          dependencies: true
+        }, function (data) {
+          if (data && data.data && data.data.snippets.length > 0) {
+            var snippet = data.data.snippets[0];
+            facet.properties.statement(snippet.statement);
+            facet.template.chartSettings.chartType(snippet.chartType);
+            facet.template.chartSettings.chartX(snippet.chartX);
+            facet.template.chartSettings.chartYSingle(snippet.chartYSingle);
+            facet.template.chartSettings.chartYMulti(snippet.chartYMulti);
+            vm.search();
+          }
+        });
+      });
+    }
+
     // For Solr 5+  only
     if (typeof facet.template != 'undefined') {
       facet.template.filteredAttributeFields = ko.computed(function () { // Dup of template.filteredAttributeFields
@@ -914,6 +934,14 @@ var Collection = function (vm, collection) {
           vm.search();
         }
       });
+
+      if (facet.widgetType() === 'document-widget') {
+        var _fields = [];
+        $.each(facet.fields(), function (index, field) {
+          _fields.push(field.name());
+        });
+        facet.template.fieldsSelected(_fields);
+      }
 
       facet.template.chartSettings.chartType.subscribe(function (newValue) {
         facet.widgetType(

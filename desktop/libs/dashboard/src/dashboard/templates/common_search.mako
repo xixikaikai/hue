@@ -1795,14 +1795,21 @@ ${ dashboard.layout_skeleton(suffix='search') }
   ##  <i class="fa fa-spinner fa-spin"></i>
   ##</div>
 
+
   <!-- ko if: $root.getFacetFromQuery(id()).has_data() -->
   <div class="row-fluid" data-bind="with: $root.getFacetFromQuery(id())">
 
     <!-- ko with: $root.collection.getFacetById($parent.id()) -->
     <div>
+      <div class="selectize-wrapper query-chooser">
+        <select placeholder="${ _('Search your queries...') }" data-bind="documentChooser: { value: properties.uuid, type: 'impala' }"></select>
+      </div>
+      <div class="clearfix"></div>
+    </div>
+    <div>
 
-      <input type="text" class="input-medium" data-bind="value: properties.engine"/>
-      <textarea data-bind="value: properties.statement"></textarea>
+##       <input type="text" class="input-medium" data-bind="value: properties.engine"/>
+##       <textarea data-bind="value: properties.statement"></textarea>
 
       ## Get sub widget by ID
       ## <div data-bind="template: { name: function() { return widgetType(); }}" class="widget-main-section"></div>
@@ -3839,8 +3846,8 @@ function multiSerieDataTransformer(rawDatum) {
 function multiSerieDataTransformerGrid(rawDatum, isTimeline) {
   var _datum = [];
 
-  var chartX = searchViewModel.collection.template.chartSettings.chartX();
-  var chartY = searchViewModel.collection.template.chartSettings.chartYMulti();
+  var chartX = rawDatum.snippet.template.chartSettings.chartX();
+  var chartY = rawDatum.snippet.template.chartSettings.chartYMulti();
 
   if (chartX != null && chartY.length > 0 && rawDatum.counts.length > 0) {
     var _plottedSerie = 0;
