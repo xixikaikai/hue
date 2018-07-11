@@ -1037,7 +1037,10 @@ LDAP = ConfigSection(
       help=_("Whether or not to follow referrals."),
       type=coerce_bool,
       default=False),
-
+    LOGIN_GROUPS = Config("login_groups",
+      help=_("Define a list of Ldap groups in CSV with users that can login"),
+      type=coerce_csv,
+      default=[]),
     DEBUG = Config("debug",
       type=coerce_bool,
       default=False,
@@ -1589,6 +1592,13 @@ IS_MULTICLUSTER_ONLY = Config(
   default=False,
   type=coerce_bool,
   help=_('Choose whether to pick configs only from [desktop] [[cluster]]')
+)
+
+ENABLE_SQL_LANGUAGE_REF = Config(
+  key='enable_sql_language_ref',
+  default=False,
+  type=coerce_bool,
+  help=_('Choose whether to enable the SQL Language Reference or not.')
 )
 
 

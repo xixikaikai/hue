@@ -1418,6 +1418,21 @@ from desktop.views import _ko
           });
         }
 
+        if (options.isSolr) {
+          if (self.sources().length === 1) {
+            self.selectedSource(self.sources()[0]);
+            self.selectedSource().loadNamespaces().done(function () {
+              var solrNamespace = self.selectedSource().selectedNamespace();
+              if (solrNamespace) {
+                solrNamespace.initDatabases();
+                solrNamespace.whenLoaded(function () {
+                  solrNamespace.setDatabase('default');
+                })
+              }
+            })
+          }
+        }
+
         self.breadcrumb = ko.computed(function () {
           if (self.selectedSource()) {
             if (self.selectedSource().selectedNamespace()) {
@@ -2222,6 +2237,60 @@ from desktop.views import _ko
     })();
   </script>
 
+  <script type="text/html" id="language-reference-topic-tree">
+    <!-- ko if: $data.length -->
+    <ul class="assist-docs-topic-tree " data-bind="foreach: $data">
+      <li>
+        <a class="black-link" href="javascript: void(0);" data-bind="click: function () { $component.selectedTopic($data); }, toggle: open">
+          <i class="fa fa-fw" style="font-size: 12px;" data-bind="css: { 'fa-chevron-right': children.length && !open(), 'fa-chevron-down': children.length && open() }"></i>
+          <span class="assist-field-link" href="javascript: void(0);" data-bind="css: { 'blue': $component.selectedTopic() === $data }, text: title"></span>
+        </a>
+        <!-- ko if: open -->
+        <!-- ko template: { name: 'language-reference-topic-tree', data: children } --><!-- /ko -->
+        <!-- /ko -->
+      </li>
+    </ul>
+    <!-- /ko -->
+  </script>
+
+  <script type="text/html" id="language-reference-panel-template">
+    <div class="assist-inner-panel">
+      <div class="assist-flex-panel">
+        <div class="assist-flex-search">
+          <div class="assist-filter">
+            <input class="clearable" type="text" placeholder="Filter..." data-bind="clearable: query, value: query, valueUpdate: 'afterkeydown'">
+          </div>
+        </div>
+        <div class="assist-docs-topics" data-bind="css: { 'assist-flex-fill': !selectedTopic(), 'assist-flex-40': selectedTopic() }">
+          <!-- ko ifnot: query -->
+          <!-- ko template: { name: 'language-reference-topic-tree', data: availableTopics } --><!-- /ko -->
+          <!-- /ko -->
+          <!-- ko if: query -->
+          <!-- ko if: filteredTopics().length > 0 -->
+          <ul class="assist-docs-topic-tree" data-bind="foreach: filteredTopics">
+            <li>
+              <a class="assist-field-link" href="javascript: void(0);" data-bind="css: { 'blue': $component.selectedTopic() === $data }, click: function () { $component.selectedTopic($data); }, html: titleMatch() || title"></a>
+            </li>
+          </ul>
+          <!-- /ko -->
+          <!-- ko if: filteredTopics().length === 0 -->
+          <ul class="assist-docs-topic-tree">
+            <li class="assist-no-entries">${ _('No matches found. ') }</li>
+          </ul>
+          <!-- /ko -->
+          <!-- /ko -->
+        </div>
+        <!-- ko if: selectedTopic -->
+        <div class="assist-flex-60 assist-docs-details" data-bind="with: selectedTopic">
+          <div class="assist-panel-close"><button class="close" data-bind="click: function() { $component.selectedTopic(undefined); }">&times;</button></div>
+          <div class="assist-function-signature blue" data-bind="html: titleMatch() || title"></div>
+          <div data-bind="html: bodyMatch() || body"></div>
+        </div>
+        <!-- /ko -->
+      </div>
+    </div>
+  </script>
+
   <script type="text/html" id="functions-panel-template">
     <div class="assist-inner-panel">
       <div class="assist-flex-panel">
@@ -2278,6 +2347,122 @@ from desktop.views import _ko
 
   <script type="text/javascript">
     (function () {
+      function LanguageReferencePanel (params, element) {
+        var self = this;
+        self.disposals = [];
+        self.availableTopics = impalaLangRefTopics;
+        self.selectedTopic = ko.observable();
+
+        self.query = ko.observable();
+        self.filteredTopics = ko.pureComputed(function () {
+          var lowerCaseQuery = self.query().toLowerCase();
+          var replaceRegexp = new RegExp('(' + lowerCaseQuery + ')', 'i');
+          var flattenedTopics = [];
+
+          var findInside = function (topic) {
+            if (topic.title.toLowerCase().indexOf(lowerCaseQuery) === 0) {
+              topic.weight = 1;
+              topic.titleMatch(topic.title.replace(replaceRegexp, '<b>$1</b>'));
+              topic.bodyMatch(undefined);
+              flattenedTopics.push(topic);
+            } else if (topic.body && topic.body.toLowerCase().indexOf(lowerCaseQuery) !== -1) {
+              topic.weight = 0;
+              topic.titleMatch(undefined);
+              topic.bodyMatch(topic.body.replace(replaceRegexp, '<b>$1</b>'));
+              flattenedTopics.push(topic);
+            } else {
+              topic.titleMatch(undefined);
+              topic.bodyMatch(undefined);
+            }
+            topic.children.forEach(findInside);
+          };
+
+          self.availableTopics.forEach(findInside);
+
+          flattenedTopics.sort(function (a, b) {
+            if (a.weight !== b.weight) {
+              return b.weight - a.weight;
+            }
+            return a.title.localeCompare(b.title);
+          });
+          return flattenedTopics;
+        });
+
+        var selectedTopicSub = self.selectedTopic.subscribe(function () {
+          $(element).find('.assist-docs-details').scrollTop(0);
+        });
+
+        var querySub = self.query.subscribe(function () {
+          $(element).find('.assist-docs-topics').scrollTop(0);
+        });
+
+        var scrollToSelectedTopic = function () {
+          var topics = $(element).find('.assist-docs-topics');
+          if (topics.find('.blue').length) {
+            topics.scrollTop(Math.min(topics.scrollTop() + topics.find('.blue').position().top - 20, topics.find('> ul').height() - topics.height()));
+          }
+        };
+
+        huePubSub.subscribe('scroll.test', scrollToSelectedTopic);
+
+        var showTopicSub = huePubSub.subscribe('assist.lang.ref.panel.show.topic', function (topicId) {
+          var mainTopic = topicId.split('#')[0]; // TODO: Handle subtopics
+          var topicStack = [];
+          var findTopic = function (topics) {
+            topics.some(function (topic) {
+              topicStack.push(topic);
+              if (topic.id === mainTopic) {
+                while (topicStack.length) {
+                  topicStack.pop().open(true);
+                }
+                self.query('');
+                self.selectedTopic(topic);
+                window.setTimeout(function () {
+                  scrollToSelectedTopic();
+                }, 0);
+                return true;
+              } else if (topic.children.length) {
+                var inChild = findTopic(topic.children);
+                if (inChild) {
+                  return true;
+                }
+              }
+              topicStack.pop();
+            })
+          };
+          findTopic(self.availableTopics);
+        });
+
+        $(element).on('click.langref', function (event) {
+          if (event.target.className === 'lang-ref-link') {
+            huePubSub.publish('assist.lang.ref.panel.show.topic', $(event.target).data('target'));
+          }
+        });
+
+        self.disposals.push(function () {
+          selectedTopicSub.dispose();
+          querySub.dispose();
+          showTopicSub.remove();
+          $(element).off('click.langref');
+        });
+      }
+
+      LanguageReferencePanel.prototype.dispose = function () {
+        var self = this;
+        while (self.disposals.length) {
+          self.disposals.pop()();
+        }
+      };
+
+      ko.components.register('language-reference-panel', {
+        viewModel: {
+          createViewModel: function(params, componentInfo) {
+            return new LanguageReferencePanel(params, componentInfo.element)
+          }
+        },
+        template: { element: 'language-reference-panel-template' }
+      });
+
       function FunctionsPanel(params) {
         var self = this;
         self.categories = {};
@@ -3317,6 +3502,7 @@ from desktop.views import _ko
       <ul class="right-panel-tabs nav nav-pills">
         <li data-bind="css: { 'active' : activeTab() === 'editorAssistant' }, visible: editorAssistantTabAvailable" style="display:none;"><a href="javascript: void(0);" data-bind="click: function() { lastActiveTabEditor('editorAssistant'); activeTab('editorAssistant'); }">${ _('Assistant') }</a></li>
         <li data-bind="css: { 'active' : activeTab() === 'functions' }, visible: functionsTabAvailable" style="display:none;"><a href="javascript: void(0);" data-bind="click: function() { lastActiveTabEditor('functions'); activeTab('functions'); }">${ _('Functions') }</a></li>
+        <li data-bind="css: { 'active' : activeTab() === 'langRef' }, visible: langRefTabAvailable" style="display:none;"><a href="javascript: void(0);" data-bind="click: function() { lastActiveTabEditor('langRef'); activeTab('langRef'); }">${ _('Reference') }</a></li>
         <li data-bind="css: { 'active' : activeTab() === 'schedules' }, visible: schedulesTabAvailable" style="display:none;"><a href="javascript: void(0);" data-bind="click: function() { lastActiveTabEditor('schedules'); activeTab('schedules'); }">${ _('Schedule') }</a></li>
         <li data-bind="css: { 'active' : activeTab() === 'dashboardAssistant' }, visible: dashboardAssistantTabAvailable" style="display:none;"><a href="javascript: void(0);" data-bind="click: function() { lastActiveTabDashboard('dashboardAssistant'); activeTab('dashboardAssistant'); }">${ _('Assistant') }</a></li>
       </ul>
@@ -3328,6 +3514,10 @@ from desktop.views import _ko
 
         <!-- ko if: functionsTabAvailable -->
         <div data-bind="component: { name: 'functions-panel' }, visible: activeTab() === 'functions'"></div>
+        <!-- /ko -->
+
+        <!-- ko if: langRefTabAvailable -->
+        <div data-bind="component: { name: 'language-reference-panel' }, visible: activeTab() === 'langRef'"></div>
         <!-- /ko -->
 
         <!-- ko if: dashboardAssistantTabAvailable -->
@@ -3348,6 +3538,7 @@ from desktop.views import _ko
       var DASHBOARD_ASSISTANT_TAB = 'dashboardAssistant';
       var FUNCTIONS_TAB = 'functions';
       var SCHEDULES_TAB = 'schedules';
+      var LANG_REF_TAB = 'langRef';
 
       function RightAssistPanel(params) {
         var self = this;
@@ -3358,6 +3549,7 @@ from desktop.views import _ko
         self.editorAssistantTabAvailable = ko.observable(false);
         self.dashboardAssistantTabAvailable = ko.observable(false);
         self.functionsTabAvailable = ko.observable(false);
+        self.langRefTabAvailable = ko.observable(false);
         self.schedulesTabAvailable = ko.observable(false);
 
         var apiHelper = ApiHelper.getInstance();
@@ -3372,6 +3564,14 @@ from desktop.views import _ko
           }
         });
 
+        huePubSub.subscribe('assist.lang.ref.show.topic', function (topicId) {
+          huePubSub.publish('right.assist.show');
+          if (self.langRefTabAvailable() && self.activeTab() !== LANG_REF_TAB) {
+            self.activeTab(LANG_REF_TAB);
+          }
+          huePubSub.publish('assist.lang.ref.panel.show.topic', topicId)
+        });
+
         var updateTabs = function () {
           if (!assistEnabledApp) {
             params.rightAssistAvailable(false);
@@ -3382,6 +3582,8 @@ from desktop.views import _ko
             self.activeTab(FUNCTIONS_TAB);
           } else if (self.lastActiveTabEditor() === SCHEDULES_TAB && self.schedulesTabAvailable()) {
             self.activeTab(SCHEDULES_TAB);
+          } else if (self.lastActiveTabEditor() === LANG_REF_TAB && self.langRefTabAvailable()) {
+            self.activeTab(LANG_REF_TAB);
           } else if (self.editorAssistantTabAvailable()) {
             self.activeTab(EDITOR_ASSISTANT_TAB);
           } else if (self.functionsTabAvailable()) {
@@ -3399,6 +3601,7 @@ from desktop.views import _ko
 
         var updateContentsForType = function (type) {
           self.functionsTabAvailable(type === 'hive' || type === 'impala' || type === 'pig');
+          self.langRefTabAvailable(type === 'impala' && window.ENABLE_SQL_LANGUAGE_REF);
           self.editorAssistantTabAvailable((!window.IS_EMBEDDED || window.EMBEDDED_ASSISTANT_ENABLED) && (type === 'hive' || type === 'impala'));
           self.dashboardAssistantTabAvailable(type === 'dashboard');
           self.schedulesTabAvailable(false);
